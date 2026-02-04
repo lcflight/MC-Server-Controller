@@ -5,7 +5,7 @@ const START_URL = 'https://6yk7rznufd7y7dnbeghcu7rcye0upukf.lambda-url.us-east-2
 const STATUS_URL = 'https://tctml2n2ct5eskfsgmvld6x2lq0xaqbc.lambda-url.us-east-2.on.aws/'
 
 const POLL_INTERVAL_MS = 5_000
-const POLL_TIMEOUT_MS = 45_000
+const POLL_TIMEOUT_MS = 90_000
 
 const loading = ref(false)
 const error = ref(null)
