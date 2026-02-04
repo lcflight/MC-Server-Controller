@@ -10,7 +10,7 @@ const POLL_TIMEOUT_MS = 45_000
 const loading = ref(false)
 const error = ref(null)
 const result = ref(null)
-const copied = ref(false)
+const copied = ref(null)
 
 const statusLoading = ref(false)
 const minecraftReady = ref(null) // null = unknown, false = checking/not ready, true = ready
@@ -152,12 +152,14 @@ async function checkStatusManual() {
   }
 }
 
-async function copyIp() {
-  if (!result.value?.publicIpv4) return
+async function copyText(text, kind) {
+  if (!text) return
   try {
-    await navigator.clipboard.writeText(result.value.publicIpv4)
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 1500)
+    await navigator.clipboard.writeText(text)
+    copied.value = kind
+    setTimeout(() => {
+      if (copied.value === kind) copied.value = null
+    }, 1500)
   } catch {
     // ignore clipboard errors
   }
@@ -198,8 +200,25 @@ onUnmounted(stopPolling)
         <div class="ip-row">
           <span class="label">Server IP</span>
           <span class="ip">{{ result.publicIpv4 }}</span>
-          <button type="button" class="copy-btn" @click="copyIp">
-            {{ copied ? 'Copied!' : 'Copy' }}
+          <button
+            type="button"
+            class="copy-btn"
+            aria-label="Copy server IP"
+            @click="copyText(result.publicIpv4, 'ip')"
+          >
+            {{ copied === 'ip' ? '✓' : '⧉' }}
+          </button>
+        </div>
+        <div class="ip-row">
+          <span class="label">server address</span>
+          <span class="ip">{{ result.publicIpv4 }}:25565</span>
+          <button
+            type="button"
+            class="copy-btn"
+            aria-label="Copy server address"
+            @click="copyText(`${result.publicIpv4}:25565`, 'address')"
+          >
+            {{ copied === 'address' ? '✓' : '⧉' }}
           </button>
         </div>
         <p v-if="minecraftReady === true" class="ready-status">
@@ -451,6 +470,10 @@ h3 {
   flex-wrap: wrap;
 }
 
+.ip-row + .ip-row {
+  margin-top: 0.5rem;
+}
+
 .label {
   font-size: 0.8125rem;
   font-weight: 600;
@@ -469,9 +492,9 @@ h3 {
 }
 
 .copy-btn {
-  padding: 0.35rem 0.75rem;
+  padding: 0.35rem 0.6rem;
   font-family: inherit;
-  font-size: 0.8125rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   color: #e2e8f0;
