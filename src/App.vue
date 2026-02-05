@@ -1,13 +1,16 @@
 <script setup>
-import { ref, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 const START_URL = 'https://6yk7rznufd7y7dnbeghcu7rcye0upukf.lambda-url.us-east-2.on.aws/'
 const STATUS_URL = 'https://tctml2n2ct5eskfsgmvld6x2lq0xaqbc.lambda-url.us-east-2.on.aws/'
+const STATE_URL = 'https://oi4y6ecythpjrueovwlktyjrsq0eiymd.lambda-url.us-east-2.on.aws/state'
 
 const POLL_INTERVAL_MS = 5_000
 const POLL_TIMEOUT_MS = 90_000
 
 const loading = ref(false)
+const initialLoading = ref(false)
+const refreshLoading = ref(false)
 const error = ref(null)
 const result = ref(null)
 const copied = ref(null)
@@ -37,8 +40,14 @@ async function fetchStatus() {
   return res.json()
 }
 
-async function checkStatus(updateReady = true) {
-  statusLoading.value = true
+async function fetchState() {
+  const res = await fetch(STATE_URL, { method: 'GET' })
+  if (!res.ok) throw new Error(res.statusText || 'Failed to fetch state')
+  return res.json()
+}
+
+async function checkStatus(updateReady = true, setLoading = true) {
+  if (setLoading) statusLoading.value = true
   try {
     const data = await fetchStatus()
     const readyFlag = data?.minecraft?.readyToJoin
@@ -64,7 +73,7 @@ async function checkStatus(updateReady = true) {
     }
     throw e
   } finally {
-    statusLoading.value = false
+    if (setLoading) statusLoading.value = false
   }
 }
 
@@ -94,7 +103,7 @@ function startStatusPolling() {
       return
     }
     try {
-      const { ready } = await checkStatus(true)
+      const { ready } = await checkStatus(true, false)
       if (ready) {
         stopPolling()
         return
@@ -135,6 +144,40 @@ async function startServer() {
   }
 }
 
+async function checkInitialState(kind = 'initial') {
+  if (kind === 'initial') initialLoading.value = true
+  if (kind === 'refresh') refreshLoading.value = true
+  error.value = null
+  try {
+    const data = await fetchState()
+    if (data?.state === 'running' && data?.publicIp) {
+      result.value = {
+        instanceId: data.instanceId,
+        state: data.state,
+        publicIpv4: data.publicIp,
+      }
+      minecraftReady.value = null
+      minecraftReason.value = null
+      playersOnline.value = null
+      playersMax.value = null
+      await checkStatus(true)
+    } else if (data?.state) {
+      result.value = {
+        instanceId: data.instanceId,
+        state: data.state,
+        publicIpv4: data.publicIp ?? null,
+      }
+    } else if (kind === 'refresh') {
+      result.value = null
+    }
+  } catch (e) {
+    error.value = e.message || 'Failed to fetch current state'
+  } finally {
+    if (kind === 'initial') initialLoading.value = false
+    if (kind === 'refresh') refreshLoading.value = false
+  }
+}
+
 async function checkStatusManual() {
   if (isPolling.value) return
   statusLoading.value = true
@@ -166,6 +209,10 @@ async function copyText(text, kind) {
 }
 
 onUnmounted(stopPolling)
+
+onMounted(() => {
+  checkInitialState('initial')
+})
 </script>
 
 <template>
@@ -179,31 +226,49 @@ onUnmounted(stopPolling)
       </div>
 
       <button
+        v-if="result?.state !== 'running'"
         type="button"
         class="start-btn"
-        :disabled="loading"
+        :disabled="loading || initialLoading"
         @click="startServer"
       >
         <span class="btn-icon">{{ loading ? '⋯' : '▶' }}</span>
         {{ loading ? 'Starting…' : 'Start MC Server' }}
       </button>
+      <button
+        v-else
+        type="button"
+        class="start-btn refresh-btn"
+        :disabled="refreshLoading"
+        @click="checkInitialState('refresh')"
+      >
+        <span class="btn-icon">{{ refreshLoading ? '⋯' : '↻' }}</span>
+        {{ refreshLoading ? 'Refreshing…' : 'Refresh server state' }}
+      </button>
 
+      <p v-if="initialLoading && !result" class="loading">Checking current server state…</p>
       <p v-if="error" class="error">{{ error }}</p>
 
       <div v-if="result" class="result card">
         <div class="result-header">
-          <span class="result-badge">Online</span>
-          <span v-if="minecraftReady === true" class="result-badge ready-badge">Ready to join</span>
-          <span v-else-if="statusLoading || isPolling" class="result-badge checking-badge">Checking…</span>
-          <span v-else-if="minecraftReady === false" class="result-badge not-ready-badge">Not yet ready</span>
+          <span
+            class="result-badge"
+            :class="result.state === 'running' ? 'ready-badge' : 'not-ready-badge'"
+          >
+            {{ result.state === 'running' ? 'Online' : 'Offline' }}
+          </span>
+          <span v-if="result.state === 'running' && minecraftReady === true" class="result-badge ready-badge">Ready to join</span>
+          <span v-else-if="result.state === 'running' && (statusLoading || isPolling)" class="result-badge checking-badge">Checking…</span>
+          <span v-else-if="result.state === 'running' && minecraftReady === false" class="result-badge not-ready-badge">Not yet ready</span>
         </div>
         <div class="ip-row">
           <span class="label">Server IP</span>
-          <span class="ip">{{ result.publicIpv4 }}</span>
+          <span class="ip">{{ result.publicIpv4 || 'NA' }}</span>
           <button
             type="button"
             class="copy-btn"
             aria-label="Copy server IP"
+            :disabled="!result.publicIpv4"
             @click="copyText(result.publicIpv4, 'ip')"
           >
             {{ copied === 'ip' ? '✓' : '⧉' }}
@@ -211,11 +276,12 @@ onUnmounted(stopPolling)
         </div>
         <div class="ip-row">
           <span class="label">server address</span>
-          <span class="ip">{{ result.publicIpv4 }}:25565</span>
+          <span class="ip">{{ result.publicIpv4 ? `${result.publicIpv4}:25565` : 'NA' }}</span>
           <button
             type="button"
             class="copy-btn"
             aria-label="Copy server address"
+            :disabled="!result.publicIpv4"
             @click="copyText(`${result.publicIpv4}:25565`, 'address')"
           >
             {{ copied === 'address' ? '✓' : '⧉' }}
@@ -235,10 +301,10 @@ onUnmounted(stopPolling)
         <button
           type="button"
           class="check-status-btn"
-          :disabled="isPolling || statusLoading"
+          :disabled="result.state !== 'running' || isPolling || statusLoading"
           @click="checkStatusManual"
         >
-          {{ statusLoading ? 'Checking…' : 'Check status now' }}
+          {{ statusLoading || isPolling ? 'Checking…' : 'Check status now' }}
         </button>
       </div>
     </div>
@@ -345,6 +411,16 @@ h3 {
   background: linear-gradient(180deg, #2dd66b 0%, #22c55e 100%);
 }
 
+.refresh-btn {
+  background: linear-gradient(180deg, #38bdf8 0%, #0ea5e9 100%);
+  box-shadow: 0 2px 12px rgba(14, 165, 233, 0.35);
+}
+
+.refresh-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 20px rgba(14, 165, 233, 0.45);
+  background: linear-gradient(180deg, #60d2ff 0%, #38bdf8 100%);
+}
+
 .start-btn:active:not(:disabled) {
   transform: translateY(0);
 }
@@ -368,6 +444,12 @@ h3 {
   background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 8px;
+}
+
+.loading {
+  margin-top: 1rem;
+  font-size: 0.9375rem;
+  color: #94a3b8;
 }
 
 .result {
@@ -507,6 +589,11 @@ h3 {
 .copy-btn:hover {
   background: rgba(71, 85, 105, 0.9);
   border-color: rgba(100, 116, 139, 0.6);
+}
+
+.copy-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .copy-btn:active {
