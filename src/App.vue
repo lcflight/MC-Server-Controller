@@ -18,13 +18,23 @@ const copied = ref(null)
 const statusLoading = ref(false)
 const minecraftReady = ref(null) // null = unknown, false = checking/not ready, true = ready
 const minecraftReason = ref(null)
+const minecraftStage = ref(null)
+const minecraftSignals = ref(null)
+const minecraftRcon = ref(null)
+const minecraftLogTail = ref(null)
+const minecraftError = ref(null)
+const showProgress = ref(false)
+const barCompleting = ref(false)
 const playersOnline = ref(null) // number when known
 const playersMax = ref(null) // number when known
 const isPolling = ref(false)
+const pollElapsedSeconds = ref(0)
 let pollTimer = null
 let pollStartedAt = null
+let pollElapsedTimer = null
+let progressHideTimer = null
 
-// "There are 2 of a max of 20 players online: ..." (from ssm.stdout)
+// "There are 2 of a max of 20 players online: ..." (from RCON output)
 const PLAYERS_RE = /There are (\d+) of a max of (\d+) players online/
 
 function parsePlayersFromStdout(stdout) {
@@ -50,16 +60,22 @@ async function checkStatus(updateReady = true, setLoading = true) {
   if (setLoading) statusLoading.value = true
   try {
     const data = await fetchStatus()
-    const readyFlag = data?.minecraft?.readyToJoin
+    const minecraft = data?.minecraft ?? {}
+    const readyFlag = minecraft?.readyToJoin
     const ready =
       readyFlag === true ||
       readyFlag === 'true' ||
       data?.ssm?.stdout?.includes('__MC_READY__')
-    const reason = data?.minecraft?.reason ?? null
-    const { online, max } = parsePlayersFromStdout(data?.ssm?.stdout)
+    const reason = minecraft?.stage ?? null
+    const { online, max } = parsePlayersFromStdout(minecraft?.rcon?.out)
     if (updateReady) {
       minecraftReady.value = ready
       minecraftReason.value = reason
+      minecraftStage.value = minecraft?.stage ?? null
+      minecraftSignals.value = minecraft?.signals ?? null
+      minecraftRcon.value = minecraft?.rcon ?? null
+      minecraftLogTail.value = minecraft?.logTail ?? null
+      minecraftError.value = minecraft?.error ?? null
       playersOnline.value = online
       playersMax.value = max
     }
@@ -68,6 +84,11 @@ async function checkStatus(updateReady = true, setLoading = true) {
     if (updateReady) {
       minecraftReady.value = false
       minecraftReason.value = null
+      minecraftStage.value = null
+      minecraftSignals.value = null
+      minecraftRcon.value = null
+      minecraftLogTail.value = null
+      minecraftError.value = null
       playersOnline.value = null
       playersMax.value = null
     }
@@ -82,18 +103,41 @@ function stopPolling() {
     clearTimeout(pollTimer)
     pollTimer = null
   }
+  if (pollElapsedTimer) {
+    clearInterval(pollElapsedTimer)
+    pollElapsedTimer = null
+  }
+  if (progressHideTimer) {
+    clearTimeout(progressHideTimer)
+    progressHideTimer = null
+  }
   pollStartedAt = null
   isPolling.value = false
+  pollElapsedSeconds.value = 0
+  showProgress.value = false
+  barCompleting.value = false
 }
 
 function startStatusPolling() {
   stopPolling()
   minecraftReady.value = false
   minecraftReason.value = null
+  minecraftStage.value = null
+  minecraftSignals.value = null
+  minecraftRcon.value = null
+  minecraftLogTail.value = null
+  minecraftError.value = null
   playersOnline.value = null
   playersMax.value = null
+  showProgress.value = true
+  barCompleting.value = false
   isPolling.value = true
   pollStartedAt = Date.now()
+  pollElapsedSeconds.value = 0
+  pollElapsedTimer = setInterval(() => {
+    if (!pollStartedAt) return
+    pollElapsedSeconds.value = Math.floor((Date.now() - pollStartedAt) / 1000)
+  }, 1000)
 
   async function poll() {
     if (!pollStartedAt) return
@@ -105,7 +149,21 @@ function startStatusPolling() {
     try {
       const { ready } = await checkStatus(true, false)
       if (ready) {
-        stopPolling()
+        barCompleting.value = true
+        isPolling.value = false
+        pollStartedAt = null
+        if (pollTimer) {
+          clearTimeout(pollTimer)
+          pollTimer = null
+        }
+        if (pollElapsedTimer) {
+          clearInterval(pollElapsedTimer)
+          pollElapsedTimer = null
+        }
+        progressHideTimer = setTimeout(() => {
+          showProgress.value = false
+          barCompleting.value = false
+        }, 650)
         return
       }
     } catch {
@@ -118,12 +176,47 @@ function startStatusPolling() {
   poll()
 }
 
+const POLL_TIMEOUT_SECONDS = Math.ceil(POLL_TIMEOUT_MS / 1000)
+
+function pollProgressPercent() {
+  if (!pollStartedAt) return 0
+  return Math.min(100, Math.round((pollElapsedSeconds.value / POLL_TIMEOUT_SECONDS) * 100))
+}
+
+function getPollingDetail() {
+  const stage = minecraftStage.value || minecraftReason.value
+  if (stage === 'ssm_in_progress') return 'Waiting for SSM status'
+  if (stage === 'missing_mc_dir') return 'Server path is not configured'
+  if (stage === 'missing_mcrcon') return 'mcrcon is not installed on the server'
+  if (stage === 'starting_process') return 'Starting Java process'
+  if (stage === 'port_open') return 'Minecraft port is open'
+  if (stage === 'rcon_listen') return 'RCON port is listening'
+  if (stage === 'loading_world') return 'Loading world'
+  if (stage === 'preparing_spawn') return 'Preparing spawn area'
+  if (stage === 'started') return 'Server started, waiting for RCON'
+  return 'Waiting for the Minecraft server to accept connections'
+}
+
+function getPollingSummary() {
+  const parts = [getPollingDetail()]
+  if (minecraftSignals.value?.java_running === true) parts.push('Java on')
+  if (minecraftSignals.value?.mc_port_listening === true) parts.push('Game port open')
+  if (minecraftSignals.value?.rcon_port_listening === true) parts.push('RCON port open')
+  if (minecraftRcon.value?.ok === true) parts.push('RCON ready')
+  return parts.join(' · ')
+}
+
 async function startServer() {
   loading.value = true
   error.value = null
   result.value = null
   minecraftReady.value = null
   minecraftReason.value = null
+  minecraftStage.value = null
+  minecraftSignals.value = null
+  minecraftRcon.value = null
+  minecraftLogTail.value = null
+  minecraftError.value = null
   playersOnline.value = null
   playersMax.value = null
   stopPolling()
@@ -158,6 +251,11 @@ async function checkInitialState(kind = 'initial') {
       }
       minecraftReady.value = null
       minecraftReason.value = null
+      minecraftStage.value = null
+      minecraftSignals.value = null
+      minecraftRcon.value = null
+      minecraftLogTail.value = null
+      minecraftError.value = null
       playersOnline.value = null
       playersMax.value = null
       await checkStatus(true)
@@ -184,6 +282,11 @@ async function checkStatusManual() {
   error.value = null
   minecraftReady.value = null
   minecraftReason.value = null
+  minecraftStage.value = null
+  minecraftSignals.value = null
+  minecraftRcon.value = null
+  minecraftLogTail.value = null
+  minecraftError.value = null
   playersOnline.value = null
   playersMax.value = null
   try {
@@ -261,6 +364,46 @@ onMounted(() => {
           <span v-else-if="result.state === 'running' && (statusLoading || isPolling)" class="result-badge checking-badge">Checking…</span>
           <span v-else-if="result.state === 'running' && minecraftReady === false" class="result-badge not-ready-badge">Not yet ready</span>
         </div>
+        <section v-if="result.state === 'running' && showProgress" class="progress-section">
+          <div class="polling-status" :class="{ 'bar-completing': barCompleting }">
+          <div class="polling-row">
+            <span class="spinner" aria-hidden="true"></span>
+            <span class="polling-text">
+              {{ getPollingSummary() }}
+            </span>
+          </div>
+          <div class="polling-bar">
+            <span
+              class="polling-bar-fill"
+              :class="{ 'bar-complete': barCompleting }"
+              :style="{ width: barCompleting ? '100%' : `${pollProgressPercent()}%` }"
+            ></span>
+          </div>
+          <details
+            v-if="minecraftStage || minecraftError || minecraftSignals || minecraftRcon || minecraftLogTail"
+            class="polling-details"
+          >
+            <summary>Details</summary>
+            <div class="polling-extra">
+              <p v-if="minecraftStage" class="status-reason">Stage: {{ minecraftStage }}</p>
+              <p v-if="minecraftError" class="error-inline">Error: {{ minecraftError }}</p>
+              <div v-if="minecraftSignals" class="signals">
+                <span class="signal">Java: {{ minecraftSignals.java_running ? 'running' : 'off' }}</span>
+                <span class="signal">Game port: {{ minecraftSignals.mc_port_listening ? 'open' : 'closed' }}</span>
+                <span class="signal">RCON port: {{ minecraftSignals.rcon_port_listening ? 'open' : 'closed' }}</span>
+                <span v-if="minecraftSignals.uptime_s != null" class="signal">Uptime: {{ minecraftSignals.uptime_s }}s</span>
+              </div>
+              <p v-if="minecraftRcon" class="status-reason">
+                RCON: {{ minecraftRcon.ok ? 'ok' : 'not ready' }} · port {{ minecraftRcon.port }}
+              </p>
+              <details v-if="minecraftLogTail" class="log-details">
+                <summary>Logs</summary>
+                <pre class="log-tail">{{ minecraftLogTail }}</pre>
+              </details>
+            </div>
+          </details>
+          </div>
+        </section>
         <div class="ip-row">
           <span class="label">Server IP</span>
           <span class="ip">{{ result.publicIpv4 || 'NA' }}</span>
@@ -291,7 +434,6 @@ onMounted(() => {
           Ready to join
           <span v-if="playersOnline != null && playersMax != null" class="players-count"> · {{ playersOnline }} of {{ playersMax }} players online</span>
         </p>
-        <p v-if="minecraftReady === true && minecraftReason" class="status-reason">Status: {{ minecraftReason }}</p>
         <p v-else-if="minecraftReady === false && !statusLoading && !isPolling" class="not-ready-status">Minecraft is not yet ready.</p>
         <p class="status">
           <span class="status-item">State: {{ result.state }}</span>
@@ -452,6 +594,113 @@ h3 {
   color: #94a3b8;
 }
 
+.polling-status {
+  margin: 0.75rem 0 0.5rem;
+  padding: 0.75rem;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.progress-section {
+  margin-bottom: 0.75rem;
+}
+
+.polling-status.bar-completing {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.polling-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #e2e8f0;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.polling-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.polling-bar {
+  position: relative;
+  height: 6px;
+  margin-top: 0.5rem;
+  background: rgba(71, 85, 105, 0.35);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.polling-bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #eab308 0%, #22c55e 100%);
+  transition: width 0.25s ease;
+}
+
+.polling-bar-fill.bar-complete {
+  transition: width 0.2s ease;
+}
+
+.polling-details {
+  margin-top: 0.45rem;
+}
+
+.polling-details summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.polling-details summary::before {
+  content: '▸';
+  font-size: 0.7rem;
+  opacity: 0.8;
+  transform: translateY(-0.5px);
+  transition: transform 0.15s ease;
+}
+
+.polling-details[open] summary::before {
+  transform: rotate(90deg) translateX(-1px);
+}
+
+.polling-extra {
+  margin-top: 0.45rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.2);
+}
+
+.spinner {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(148, 163, 184, 0.35);
+  border-top-color: #eab308;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .result {
   margin-top: 1.5rem;
   padding: 1.25rem 1.5rem;
@@ -509,6 +758,67 @@ h3 {
   font-size: 0.8125rem;
   color: #94a3b8;
   margin: 0.25rem 0 0;
+}
+
+.error-inline {
+  font-size: 0.8125rem;
+  color: #fca5a5;
+  margin: 0.25rem 0 0;
+}
+
+.signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.signal {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+}
+
+.log-tail {
+  margin: 0.6rem 0 0;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.75rem;
+  color: #cbd5f5;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.log-details {
+  margin-top: 0.5rem;
+}
+
+.log-details summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.log-details summary::before {
+  content: '▸';
+  font-size: 0.7rem;
+  opacity: 0.8;
+  transform: translateY(-0.5px);
+  transition: transform 0.15s ease;
+}
+
+.log-details[open] summary::before {
+  transform: rotate(90deg) translateX(-1px);
 }
 
 .not-ready-status {
