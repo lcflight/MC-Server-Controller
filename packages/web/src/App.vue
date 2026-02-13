@@ -5,6 +5,9 @@ const START_URL = 'https://6yk7rznufd7y7dnbeghcu7rcye0upukf.lambda-url.us-east-2
 const STATUS_URL = 'https://tctml2n2ct5eskfsgmvld6x2lq0xaqbc.lambda-url.us-east-2.on.aws/'
 const STATE_URL = 'https://oi4y6ecythpjrueovwlktyjrsq0eiymd.lambda-url.us-east-2.on.aws/state'
 
+const API_BASE = import.meta.env.VITE_API_URL ?? ''
+const MC_JOIN_HOSTNAME = 'mc.server.seasonsprint.com:25565'
+
 const POLL_INTERVAL_MS = 5_000
 const POLL_TIMEOUT_MS = 90_000
 
@@ -14,6 +17,8 @@ const refreshLoading = ref(false)
 const error = ref(null)
 const result = ref(null)
 const copied = ref(null)
+const dnsUpdateStatus = ref('idle') // 'idle' | 'pending' | 'ok' | 'error'
+const dnsUpdateError = ref(null)
 
 const statusLoading = ref(false)
 const minecraftReady = ref(null) // null = unknown, false = checking/not ready, true = ready
@@ -206,10 +211,35 @@ function getPollingSummary() {
   return parts.join(' · ')
 }
 
+async function updateDns(ipv4) {
+  if (!ipv4) return
+  dnsUpdateStatus.value = 'pending'
+  dnsUpdateError.value = null
+  try {
+    const r = await fetch(`${API_BASE}/api/update-dns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ipv4 }),
+    })
+    const data = await r.json().catch(() => ({}))
+    if (r.ok) {
+      dnsUpdateStatus.value = 'ok'
+    } else {
+      dnsUpdateStatus.value = 'error'
+      dnsUpdateError.value = data?.error || data?.detail || r.statusText
+    }
+  } catch (e) {
+    dnsUpdateStatus.value = 'error'
+    dnsUpdateError.value = e.message || 'Request failed'
+  }
+}
+
 async function startServer() {
   loading.value = true
   error.value = null
   result.value = null
+  dnsUpdateStatus.value = 'idle'
+  dnsUpdateError.value = null
   minecraftReady.value = null
   minecraftReason.value = null
   minecraftStage.value = null
@@ -229,6 +259,7 @@ async function startServer() {
       state: data.state,
       publicIpv4: data.publicIpv4,
     }
+    updateDns(data.publicIpv4)
     startStatusPolling()
   } catch (e) {
     error.value = e.message || 'Failed to start server'
@@ -249,6 +280,8 @@ async function checkInitialState(kind = 'initial') {
         state: data.state,
         publicIpv4: data.publicIp,
       }
+      dnsUpdateStatus.value = 'idle'
+      dnsUpdateError.value = null
       minecraftReady.value = null
       minecraftReason.value = null
       minecraftStage.value = null
@@ -265,6 +298,8 @@ async function checkInitialState(kind = 'initial') {
         state: data.state,
         publicIpv4: data.publicIp ?? null,
       }
+      dnsUpdateStatus.value = 'idle'
+      dnsUpdateError.value = null
     } else if (kind === 'refresh') {
       result.value = null
     }
@@ -418,18 +453,34 @@ onMounted(() => {
           </button>
         </div>
         <div class="ip-row">
-          <span class="label">server address</span>
+          <span class="label">Join by IP</span>
           <span class="ip">{{ result.publicIpv4 ? `${result.publicIpv4}:25565` : 'NA' }}</span>
           <button
             type="button"
             class="copy-btn"
-            aria-label="Copy server address"
+            aria-label="Copy join address (IP)"
             :disabled="!result.publicIpv4"
             @click="copyText(`${result.publicIpv4}:25565`, 'address')"
           >
             {{ copied === 'address' ? '✓' : '⧉' }}
           </button>
         </div>
+        <div class="ip-row ip-row--stacked">
+          <span class="label">Join by hostname</span>
+          <span class="ip">{{ MC_JOIN_HOSTNAME }}</span>
+          <button
+            type="button"
+            class="copy-btn"
+            aria-label="Copy join address (hostname)"
+            @click="copyText(MC_JOIN_HOSTNAME, 'hostname')"
+          >
+            {{ copied === 'hostname' ? '✓' : '⧉' }}
+          </button>
+        </div>
+        <p class="propagation-note">Address propagation can take up to 5 minutes.</p>
+        <p v-if="dnsUpdateStatus === 'pending'" class="dns-status">Updating DNS…</p>
+        <p v-else-if="dnsUpdateStatus === 'ok'" class="dns-status dns-ok">DNS record updated.</p>
+        <p v-else-if="dnsUpdateStatus === 'error'" class="dns-status dns-error">DNS update failed: {{ dnsUpdateError }}</p>
         <p v-if="minecraftReady === true" class="ready-status">
           Ready to join
           <span v-if="playersOnline != null && playersMax != null" class="players-count"> · {{ playersOnline }} of {{ playersMax }} players online</span>
@@ -867,11 +918,20 @@ h3 {
 }
 
 .label {
+  flex-shrink: 0;
   font-size: 0.8125rem;
   font-weight: 600;
   color: #94a3b8;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.ip-row--stacked {
+  row-gap: 0.2rem;
+}
+
+.ip-row--stacked .label {
+  flex-basis: 100%;
 }
 
 .ip {
@@ -883,7 +943,14 @@ h3 {
   min-width: 0;
 }
 
+.ip-row--stacked .ip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .copy-btn {
+  flex-shrink: 0;
   padding: 0.35rem 0.6rem;
   font-family: inherit;
   font-size: 0.95rem;
@@ -908,6 +975,26 @@ h3 {
 
 .copy-btn:active {
   background: rgba(30, 41, 59, 0.95);
+}
+
+.propagation-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  color: #94a3b8;
+}
+
+.dns-status {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  color: #94a3b8;
+}
+
+.dns-status.dns-ok {
+  color: #86efac;
+}
+
+.dns-status.dns-error {
+  color: #fca5a5;
 }
 
 .status {
