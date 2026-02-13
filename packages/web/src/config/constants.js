@@ -9,5 +9,10 @@ export const POLL_TIMEOUT_MS = 90_000
 
 export function getUpdateDnsUrl() {
   const apiBase = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
-  return apiBase ? `${apiBase}/api/update-dns` : ''
+  return apiBase ? `${apiBase}/api/update-dns` : '/api/update-dns'
+}
+
+export function getGetDnsUrl() {
+  const apiBase = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
+  return apiBase ? `${apiBase}/api/get-dns` : '/api/get-dns'
 }

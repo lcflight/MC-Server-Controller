@@ -13,6 +13,10 @@ function handleCopy(text, kind) {
 function handleUpdateDns(ipv4) {
   ctrl.updateDns(ipv4)
 }
+
+function handleGetDns() {
+  ctrl.getDns()
+}
 </script>
 
 <template>
@@ -62,8 +66,12 @@ function handleUpdateDns(ipv4) {
         :copied="ctrl.copied?.value"
         :dns-update-status="ctrl.dnsUpdateStatus?.value ?? 'idle'"
         :dns-update-error="ctrl.dnsUpdateError?.value"
+        :get-dns-status="ctrl.getDnsStatus?.value ?? 'idle'"
+        :get-dns-error="ctrl.getDnsError?.value"
+        :get-dns-value="ctrl.getDnsValue?.value"
         @copy="handleCopy"
         @update-dns="handleUpdateDns"
+        @get-dns="handleGetDns"
         @check-status="ctrl.checkStatusManual"
       >
         <template #progress>
