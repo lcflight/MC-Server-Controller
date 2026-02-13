@@ -9,16 +9,15 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') })
 
 const app = express()
 
-// CORS: allow comma-separated origins from env, or reflect request origin, or * for any
+// CORS: allow comma-separated origins from env, or reflect request origin
 const corsOrigin = process.env.CORS_ORIGIN
-const corsOpts = corsOrigin
-  ? {
-      origin: corsOrigin.split(',').map((o) => o.trim()).filter(Boolean),
-      methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-    }
-  : { origin: true, methods: ['GET', 'POST', 'PUT', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }
-app.use(cors(corsOpts))
+let origin
+if (!corsOrigin || corsOrigin.trim() === '*') {
+  origin = true // reflect any request origin
+} else {
+  origin = corsOrigin.split(',').map((o) => o.trim()).filter(Boolean)
+}
+app.use(cors({ origin, methods: ['GET', 'POST', 'PUT', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }))
 app.use(express.json({ type: ['application/json', 'text/plain'] }))
 
 const PORT = Number(process.env.PORT) || 3001
