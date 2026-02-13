@@ -8,7 +8,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(__dirname, '../../.env') })
 
 const app = express()
-app.use(cors({ origin: process.env.CORS_ORIGIN || true }))
+
+// CORS: allow comma-separated origins from env, or reflect request origin, or * for any
+const corsOrigin = process.env.CORS_ORIGIN
+const corsOpts = corsOrigin
+  ? {
+      origin: corsOrigin.split(',').map((o) => o.trim()).filter(Boolean),
+      methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    }
+  : { origin: true, methods: ['GET', 'POST', 'PUT', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }
+app.use(cors(corsOpts))
 app.use(express.json())
 
 const PORT = Number(process.env.PORT) || 3001
@@ -30,6 +40,9 @@ function isValidIPv4(s) {
     return v >= 0 && v <= 255
   })
 }
+
+// Explicit preflight for /api/update-dns so CORS works even behind redirects
+app.options('/api/update-dns', (_, res) => res.sendStatus(204))
 
 app.post('/api/update-dns', async (req, res) => {
   const ipv4 = req.body?.ipv4
