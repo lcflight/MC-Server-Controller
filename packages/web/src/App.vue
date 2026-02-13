@@ -222,11 +222,14 @@ async function updateDns(ipv4) {
       body: JSON.stringify({ ipv4 }),
     })
     const data = await r.json().catch(() => ({}))
-    if (r.ok) {
+    // Require explicit { ok: true } from our API so we don't show success when
+    // the request hits SPA fallback (200 + HTML) in production.
+    if (r.ok && data?.ok === true) {
       dnsUpdateStatus.value = 'ok'
     } else {
       dnsUpdateStatus.value = 'error'
-      dnsUpdateError.value = data?.error || data?.detail || r.statusText
+      dnsUpdateError.value =
+        data?.error || data?.detail || (r.ok ? 'Invalid response from server' : r.statusText)
     }
   } catch (e) {
     dnsUpdateStatus.value = 'error'
