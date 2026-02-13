@@ -492,6 +492,15 @@ onMounted(() => {
         <p v-if="dnsUpdateStatus === 'pending'" class="dns-status">Updating DNS…</p>
         <p v-else-if="dnsUpdateStatus === 'ok'" class="dns-status dns-ok">DNS record updated.</p>
         <p v-else-if="dnsUpdateStatus === 'error'" class="dns-status dns-error">DNS update failed: {{ dnsUpdateError }}</p>
+        <button
+          v-if="result?.publicIpv4 && UPDATE_DNS_URL"
+          type="button"
+          class="update-dns-btn"
+          :disabled="dnsUpdateStatus === 'pending'"
+          @click="updateDns(result.publicIpv4)"
+        >
+          {{ dnsUpdateStatus === 'pending' ? 'Updating…' : (dnsUpdateStatus === 'error' ? 'Retry DNS update' : 'Update DNS again') }}
+        </button>
         <p v-if="minecraftReady === true" class="ready-status">
           Ready to join
           <span v-if="playersOnline != null && playersMax != null" class="players-count"> · {{ playersOnline }} of {{ playersMax }} players online</span>
@@ -1006,6 +1015,32 @@ h3 {
 
 .dns-status.dns-error {
   color: #fca5a5;
+}
+
+.update-dns-btn {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: #94a3b8;
+  background: rgba(51, 65, 85, 0.6);
+  border: 1px solid rgba(71, 85, 105, 0.5);
+  border-radius: 8px;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.update-dns-btn:hover:not(:disabled) {
+  color: #e2e8f0;
+  background: rgba(71, 85, 105, 0.7);
+  border-color: rgba(100, 116, 139, 0.5);
+}
+
+.update-dns-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .status {
