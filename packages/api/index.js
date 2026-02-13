@@ -44,7 +44,11 @@ function isValidIPv4(s) {
 // Explicit preflight for /api/update-dns so CORS works even behind redirects
 app.options('/api/update-dns', (_, res) => res.sendStatus(204))
 
-app.post('/api/update-dns', async (req, res) => {
+// Explicit preflight so CORS works; support both with and without trailing slash
+app.options('/api/update-dns', (_, res) => res.sendStatus(204))
+app.options('/api/update-dns/', (_, res) => res.sendStatus(204))
+
+const updateDnsHandler = async (req, res) => {
   const ipv4 = req.body?.ipv4
   if (!ipv4 || !isValidIPv4(ipv4)) {
     return res.status(400).json({ error: 'Invalid or missing ipv4' })
@@ -82,7 +86,10 @@ app.post('/api/update-dns', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message || 'DNS update failed' })
   }
-})
+}
+
+app.post('/api/update-dns', updateDnsHandler)
+app.post('/api/update-dns/', updateDnsHandler)
 
 app.listen(PORT, () => {
   console.log(`API server listening on http://localhost:${PORT}`)
