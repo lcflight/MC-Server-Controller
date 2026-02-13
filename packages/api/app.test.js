@@ -106,3 +106,54 @@ describe('POST /api/update-dns', () => {
     expect(res.body.error).toBe('Network error')
   })
 })
+
+describe('GET /api/get-dns', () => {
+  const originalFetch = global.fetch
+
+  beforeEach(() => {
+    process.env.NAMECOM_USER = 'test-user'
+    process.env.NAMECOM_TOKEN = 'test-token'
+    process.env.NAMECOM_DOMAIN = 'example.com'
+    process.env.RECORD_ID = '12345'
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it('returns 200 and answer when Name.com API succeeds', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ answer: '1.2.3.4' }),
+    })
+    const res = await request(app)
+      .get('/api/get-dns')
+      .expect(200)
+    expect(res.body.answer).toBe('1.2.3.4')
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/v4/domains/example.com/records/12345'),
+      expect.objectContaining({ method: 'GET' })
+    )
+  })
+
+  it('returns API error status when Name.com API fails', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: () => Promise.resolve('Unauthorized'),
+    })
+    const res = await request(app)
+      .get('/api/get-dns')
+      .expect(401)
+    expect(res.body.error).toBe('Name.com API error')
+  })
+
+  it('returns 500 when fetch throws', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'))
+    const res = await request(app)
+      .get('/api/get-dns')
+      .expect(500)
+    expect(res.body.error).toBe('Network error')
+  })
+})

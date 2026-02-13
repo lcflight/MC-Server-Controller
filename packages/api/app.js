@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'
-import { updateDnsHandler } from './routes/dns.js'
+import { updateDnsHandler, getDnsHandler } from './routes/dns.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(__dirname, '../../.env') })
@@ -14,7 +14,8 @@ app.use(corsMiddleware)
 app.use(express.json({ type: ['application/json', 'text/plain'] }))
 
 app.post('/api/update-dns', updateDnsHandler)
+app.get('/api/get-dns', getDnsHandler)
 
 export { app }
 export { isValidIPv4 } from './lib/validation.js'
-export { updateDnsHandler } from './routes/dns.js'
+export { updateDnsHandler, getDnsHandler } from './routes/dns.js'

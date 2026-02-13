@@ -1,7 +1,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { parsePlayersFromStdout } from '../utils/players.js'
 import { getPollingSummary } from '../utils/polling.js'
-import { getUpdateDnsUrl, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from '../config/constants.js'
+import { getUpdateDnsUrl, getGetDnsUrl, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from '../config/constants.js'
 import { fetchStatus, fetchState, startServer as apiStartServer } from '../api/server.js'
 
 const POLL_TIMEOUT_SECONDS = Math.ceil(POLL_TIMEOUT_MS / 1000)
@@ -15,6 +15,9 @@ export function useServerController() {
   const copied = ref(null)
   const dnsUpdateStatus = ref('idle')
   const dnsUpdateError = ref(null)
+  const getDnsStatus = ref('idle')
+  const getDnsError = ref(null)
+  const getDnsValue = ref(null)
 
   const statusLoading = ref(false)
   const minecraftReady = ref(null)
@@ -163,6 +166,33 @@ export function useServerController() {
     })
   }
 
+  async function getDns() {
+    const GET_DNS_URL = getGetDnsUrl()
+    if (!GET_DNS_URL) {
+      getDnsStatus.value = 'error'
+      getDnsError.value = 'API URL not configured'
+      return
+    }
+    getDnsStatus.value = 'pending'
+    getDnsError.value = null
+    getDnsValue.value = null
+    try {
+      const r = await fetch(GET_DNS_URL)
+      const data = await r.json().catch(() => ({}))
+      if (r.ok && data?.answer != null) {
+        getDnsStatus.value = 'ok'
+        getDnsValue.value = data.answer
+      } else {
+        getDnsStatus.value = 'error'
+        getDnsError.value =
+          data?.error || data?.detail || (r.ok ? 'Invalid response from server' : r.statusText)
+      }
+    } catch (e) {
+      getDnsStatus.value = 'error'
+      getDnsError.value = e.message || 'Request failed'
+    }
+  }
+
   async function updateDns(ipv4) {
     const UPDATE_DNS_URL = getUpdateDnsUrl()
     if (!ipv4) return
@@ -199,6 +229,9 @@ export function useServerController() {
     result.value = null
     dnsUpdateStatus.value = 'idle'
     dnsUpdateError.value = null
+    getDnsStatus.value = 'idle'
+    getDnsError.value = null
+    getDnsValue.value = null
     resetMinecraftState()
     stopPolling()
     try {
@@ -231,6 +264,9 @@ export function useServerController() {
         }
         dnsUpdateStatus.value = 'idle'
         dnsUpdateError.value = null
+        getDnsStatus.value = 'idle'
+        getDnsError.value = null
+        getDnsValue.value = null
         resetMinecraftState(true)
         await checkStatus(true)
       } else if (data?.state) {
@@ -241,6 +277,9 @@ export function useServerController() {
         }
         dnsUpdateStatus.value = 'idle'
         dnsUpdateError.value = null
+        getDnsStatus.value = 'idle'
+        getDnsError.value = null
+        getDnsValue.value = null
       } else if (kind === 'refresh') {
         result.value = null
       }
@@ -310,6 +349,10 @@ export function useServerController() {
     checkStatusManual,
     copyText,
     updateDns,
+    getDns,
+    getDnsStatus,
+    getDnsError,
+    getDnsValue,
     pollProgressPercent,
     getPollingSummaryValue,
   }

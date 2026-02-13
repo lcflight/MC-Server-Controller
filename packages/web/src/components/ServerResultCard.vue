@@ -1,7 +1,8 @@
 <script setup>
-import { MC_JOIN_HOSTNAME, getUpdateDnsUrl } from '../config/constants.js'
+import { computed } from 'vue'
+import { MC_JOIN_HOSTNAME, getUpdateDnsUrl, getGetDnsUrl } from '../config/constants.js'
 
-defineProps({
+const props = defineProps({
   result: { type: Object, default: null },
   minecraftReady: { type: [Boolean, Object], default: null },
   statusLoading: { type: Boolean, default: false },
@@ -18,11 +19,37 @@ defineProps({
   copied: { type: String, default: null },
   dnsUpdateStatus: { type: String, default: 'idle' },
   dnsUpdateError: { type: [String, Object], default: null },
+  getDnsStatus: { type: String, default: 'idle' },
+  getDnsError: { type: [String, Object], default: null },
+  getDnsValue: { type: String, default: null },
 })
 
-defineEmits(['copy', 'update-dns', 'check-status', 'refresh'])
+defineEmits(['copy', 'update-dns', 'get-dns', 'check-status', 'refresh'])
 
 const updateDnsUrl = getUpdateDnsUrl()
+const getDnsUrl = getGetDnsUrl()
+const dnsStatusText = computed(() => {
+  const s = props.dnsUpdateStatus
+  if (s === 'pending') return 'Updating…'
+  if (s === 'ok') return 'DNS updated'
+  if (s === 'error') {
+    const err = props.dnsUpdateError
+    return typeof err === 'string' ? `Failed: ${err}` : 'Failed'
+  }
+  return null
+})
+const dnsHasRun = computed(() => props.dnsUpdateStatus !== 'idle')
+const getDnsStatusText = computed(() => {
+  const s = props.getDnsStatus
+  if (s === 'pending') return 'Checking…'
+  if (s === 'ok') return props.getDnsValue ?? '—'
+  if (s === 'error') {
+    const err = props.getDnsError
+    return typeof err === 'string' ? `Failed: ${err}` : 'Failed'
+  }
+  return null
+})
+const getDnsHasRun = computed(() => props.getDnsStatus !== 'idle')
 </script>
 
 <template>
@@ -77,19 +104,65 @@ const updateDnsUrl = getUpdateDnsUrl()
         {{ copied === 'hostname' ? '✓' : '⧉' }}
       </button>
     </div>
-    <p class="propagation-note">Address propagation can take up to 5 minutes.</p>
-    <p v-if="dnsUpdateStatus === 'pending'" class="dns-status">Updating DNS…</p>
-    <p v-else-if="dnsUpdateStatus === 'ok'" class="dns-status dns-ok">DNS record updated.</p>
-    <p v-else-if="dnsUpdateStatus === 'error'" class="dns-status dns-error">DNS update failed: {{ dnsUpdateError }}</p>
-    <button
-      v-if="result?.publicIpv4 && updateDnsUrl"
-      type="button"
-      class="update-dns-btn"
-      :disabled="dnsUpdateStatus === 'pending'"
-      @click="$emit('update-dns', result.publicIpv4)"
-    >
-      {{ dnsUpdateStatus === 'pending' ? 'Updating…' : (dnsUpdateStatus === 'error' ? 'Retry DNS update' : 'Update DNS again') }}
-    </button>
+    <p v-if="dnsUpdateStatus === 'ok'" class="propagation-note">Address propagation can take up to 5 minutes.</p>
+    <div v-if="result?.publicIpv4 && updateDnsUrl" class="dns-row">
+      <template v-if="!dnsHasRun">
+        <button
+          type="button"
+          class="update-dns-btn update-dns-btn--text"
+          aria-label="Update DNS"
+          @click="$emit('update-dns', result.publicIpv4)"
+        >
+          Update DNS
+        </button>
+      </template>
+      <template v-else>
+        <span
+          class="dns-status"
+          :class="{ 'dns-ok': dnsUpdateStatus === 'ok', 'dns-error': dnsUpdateStatus === 'error' }"
+        >
+          {{ dnsStatusText }}
+        </span>
+        <button
+          type="button"
+          class="update-dns-btn update-dns-btn--icon"
+          :aria-label="dnsUpdateStatus === 'pending' ? 'Updating DNS…' : (dnsUpdateStatus === 'error' ? 'Retry DNS update' : 'Update DNS again')"
+          :disabled="dnsUpdateStatus === 'pending'"
+          @click="$emit('update-dns', result.publicIpv4)"
+        >
+          {{ dnsUpdateStatus === 'pending' ? '⋯' : '⟳' }}
+        </button>
+      </template>
+    </div>
+    <div v-if="result?.publicIpv4 && getDnsUrl" class="dns-row">
+      <template v-if="!getDnsHasRun">
+        <button
+          type="button"
+          class="update-dns-btn update-dns-btn--text"
+          aria-label="Check DNS record"
+          @click="$emit('get-dns')"
+        >
+          Check DNS record
+        </button>
+      </template>
+      <template v-else>
+        <span
+          class="dns-status"
+          :class="{ 'dns-ok': getDnsStatus === 'ok', 'dns-error': getDnsStatus === 'error' }"
+        >
+          {{ getDnsStatusText }}
+        </span>
+        <button
+          type="button"
+          class="update-dns-btn update-dns-btn--icon"
+          :aria-label="getDnsStatus === 'pending' ? 'Checking DNS…' : (getDnsStatus === 'error' ? 'Retry check' : 'Check DNS again')"
+          :disabled="getDnsStatus === 'pending'"
+          @click="$emit('get-dns')"
+        >
+          {{ getDnsStatus === 'pending' ? '⋯' : '⟳' }}
+        </button>
+      </template>
+    </div>
     <p v-if="minecraftReady === true" class="ready-status">
       Ready to join
       <span v-if="playersOnline != null && playersMax != null" class="players-count"> · {{ playersOnline }} of {{ playersMax }} players online</span>
@@ -342,8 +415,14 @@ const updateDnsUrl = getUpdateDnsUrl()
   color: #94a3b8;
 }
 
+.dns-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 .dns-status {
-  margin: 0.35rem 0 0;
   font-size: 0.8125rem;
   color: #94a3b8;
 }
@@ -357,27 +436,43 @@ const updateDnsUrl = getUpdateDnsUrl()
 }
 
 .update-dns-btn {
-  display: inline-block;
-  margin-top: 0.5rem;
-  padding: 0.4rem 0.7rem;
+  flex-shrink: 0;
   font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.update-dns-btn--text {
+  padding: 0.4rem 0.7rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  cursor: pointer;
   color: #94a3b8;
   background: rgba(51, 65, 85, 0.6);
   border: 1px solid rgba(71, 85, 105, 0.5);
   border-radius: 8px;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.update-dns-btn:hover:not(:disabled) {
+.update-dns-btn--text:hover {
   color: #e2e8f0;
   background: rgba(71, 85, 105, 0.7);
   border-color: rgba(100, 116, 139, 0.5);
 }
 
-.update-dns-btn:disabled {
+.update-dns-btn--icon {
+  padding: 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+}
+
+.update-dns-btn--icon:hover:not(:disabled) {
+  color: #e2e8f0;
+}
+
+.update-dns-btn--icon:disabled {
   opacity: 0.7;
   cursor: not-allowed;
 }

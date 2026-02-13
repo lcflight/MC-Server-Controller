@@ -53,3 +53,32 @@ export async function updateDnsHandler(req, res) {
     res.status(500).json({ error: e.message || 'DNS update failed' })
   }
 }
+
+export async function getDnsHandler(req, res) {
+  const config = getDnsConfig()
+  if (!config.user || !config.token || !config.recordId || !config.domain) {
+    return res.status(500).json({ error: 'DNS not configured' })
+  }
+
+  const url = `${NAMECOM_API}/v4/domains/${encodeURIComponent(config.domain)}/records/${encodeURIComponent(config.recordId)}`
+  const auth = Buffer.from(`${config.user}:${config.token}`, 'utf8').toString('base64')
+
+  try {
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Basic ${auth}` },
+    })
+    if (!r.ok) {
+      const text = await r.text()
+      return res.status(r.status).json({
+        error: 'Name.com API error',
+        detail: text || r.statusText,
+      })
+    }
+    const data = await r.json()
+    const answer = data?.answer ?? null
+    res.json({ answer })
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'DNS fetch failed' })
+  }
+}
