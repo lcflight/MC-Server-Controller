@@ -7,7 +7,7 @@ const STATE_URL = 'https://oi4y6ecythpjrueovwlktyjrsq0eiymd.lambda-url.us-east-2
 
 // Normalize: no trailing slash so path concatenation is safe; empty if unset
 const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '')
-const UPDATE_DNS_URL = API_BASE ? `${API_BASE}/api/update-dns/` : ''
+const UPDATE_DNS_URL = API_BASE ? `${API_BASE}/api/update-dns` : ''
 const MC_JOIN_HOSTNAME = 'mc.server.seasonsprint.com:25565'
 
 const POLL_INTERVAL_MS = 5_000
