@@ -225,8 +225,7 @@ async function updateDns(ipv4) {
   try {
     const r = await fetch(UPDATE_DNS_URL, {
       method: 'POST',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ ipv4 }),
     })
     const data = await r.json().catch(() => ({}))

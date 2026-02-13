@@ -19,7 +19,7 @@ const corsOpts = corsOrigin
     }
   : { origin: true, methods: ['GET', 'POST', 'PUT', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }
 app.use(cors(corsOpts))
-app.use(express.json())
+app.use(express.json({ type: ['application/json', 'text/plain'] }))
 
 const PORT = Number(process.env.PORT) || 3001
 const NAMECOM_USER = process.env.NAMECOM_USER
