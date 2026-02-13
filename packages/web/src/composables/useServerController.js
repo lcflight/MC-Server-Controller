@@ -36,8 +36,8 @@ export function useServerController() {
   let pollElapsedTimer = null
   let progressHideTimer = null
 
-  function resetMinecraftState() {
-    minecraftReady.value = false
+  function resetMinecraftState(unknownReady = false) {
+    minecraftReady.value = unknownReady ? null : false
     minecraftReason.value = null
     minecraftStage.value = null
     minecraftSignals.value = null
@@ -231,8 +231,7 @@ export function useServerController() {
         }
         dnsUpdateStatus.value = 'idle'
         dnsUpdateError.value = null
-        minecraftReady.value = null
-        resetMinecraftState()
+        resetMinecraftState(true)
         await checkStatus(true)
       } else if (data?.state) {
         result.value = {
@@ -257,8 +256,7 @@ export function useServerController() {
     if (isPolling.value) return
     statusLoading.value = true
     error.value = null
-    minecraftReady.value = null
-    resetMinecraftState()
+    resetMinecraftState(true)
     try {
       await checkStatus(true)
     } catch (e) {
